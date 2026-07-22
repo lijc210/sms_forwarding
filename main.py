@@ -248,6 +248,19 @@ async def _refresh_sms_cache():
             logger.debug("SMS refresh error: %s", e)
 
 
+def _decode_ucs2(text: str) -> str:
+    s = text.strip()
+    if not s or len(s) < 16 or len(s) % 4 != 0:
+        return text
+    if not re.fullmatch(r'[0-9A-Fa-f]+', s):
+        return text
+    try:
+        raw = bytes.fromhex(s)
+        return raw.decode("utf-16-be")
+    except (ValueError, UnicodeDecodeError):
+        return text
+
+
 async def _list_sms() -> list[dict]:
     if not modem.connected:
         return []
@@ -277,7 +290,8 @@ async def _list_sms() -> list[dict]:
             while i < len(r) and not r[i].startswith("+CMGL:") and r[i] != "":
                 text_parts.append(r[i])
                 i += 1
-            text = "\n".join(text_parts).strip()
+            raw_text = "\n".join(text_parts).strip()
+            text = _decode_ucs2(raw_text)
 
             parsed_date = date_raw.replace("+", " ").strip()
             messages.append({
