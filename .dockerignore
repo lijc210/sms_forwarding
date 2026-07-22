@@ -1,0 +1,106 @@
+# Python虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# Python编译文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Python包的本地安装
+local/
+.cache/
+
+# 开发和IDE配置
+.vscode/
+.zed/
+.idea/
+*.swp
+*.swo
+*~
+
+# 版本控制系统
+.git/
+.gitignore
+
+# 构建输出和日志
+*.log
+*.tmp
+*.pid
+*.pid.lock
+
+# 配置文件模板
+/config/*.example
+/config/*.local
+/config/*.template
+
+# 测试文件
+/tests/
+*.test
+*.spec
+
+# 文档
+/docs/
+*.md
+*.rst
+
+# 临时文件
+*.bak
+*.old
+*.backup
+
+# Jupyter笔记本检查点
+.ipynb_checkpoints/
+
+# mypy缓存
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre类型检查器
+.pyre/
+
+# 覆盖率报告
+.coverage
+htmlcov/
+.coverage.*
+
+# 性能分析
+prof/
+profile/
+*.prof
+
+# 数据文件
+*.db
+*.sqlite3
+*.sqlite
+*.sql
+data/
+
+# Docker构建缓存
+.dockerignore
+
+# UV缓存
+.uv/
