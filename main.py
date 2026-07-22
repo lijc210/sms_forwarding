@@ -464,4 +464,43 @@ async def run_keepalive_now():
     return {"success": True, "message": "保号任务已触发"}
 
 
+class BalanceQuery(BaseModel):
+    ussd_code: str = "*100#"
+
+
+balance_cache: dict = {"result": None, "updated_at": None}
+balance_cache_lock = asyncio.Lock()
+
+
+@app.get("/api/balance")
+async def get_balance():
+    async with balance_cache_lock:
+        return dict(balance_cache)
+
+
+@app.post("/api/balance/query")
+async def query_balance(req: BalanceQuery = BalanceQuery()):
+    if not modem.connected:
+        raise HTTPException(503, "Modem not connected")
+    try:
+        await modem.send_command("AT+CUSD=1", timeout=2)
+        r = await modem.send_command(f'AT+CUSD=1,"{req.ussd_code}",15', timeout=30)
+        text = ""
+        for line in r:
+            if "+CUSD:" in line:
+                parts = line.split('"')
+                if len(parts) > 1:
+                    raw = parts[1]
+                    decoded = _decode_ucs2(raw)
+                    text = decoded if decoded != raw else raw
+                    break
+        result = text or "\n".join(r)
+        async with balance_cache_lock:
+            balance_cache["result"] = result
+            balance_cache["updated_at"] = datetime.now(timezone.utc).isoformat()
+        return {"success": True, "result": result}
+    except ATError as e:
+        raise HTTPException(400, f"USSD 查询失败: {e}")
+
+
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

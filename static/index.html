@@ -87,6 +87,17 @@ header h1 { font-size: 22px; font-weight: 600; display: flex; align-items: cente
     </div>
   </div>
 
+  <div class="grid-4" style="margin-bottom:24px">
+    <div class="card">
+      <h2>余额查询</h2>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="info-row"><span class="label">USSD 码</span><input type="text" id="ussdCode" value="*100#" style="width:100px;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:4px 8px;color:#e2e8f0;font-size:12px;outline:none"></div>
+        <button class="btn btn-sm" onclick="queryBalance()">查询余额</button>
+        <div id="balanceResult" style="font-size:13px;color:#94a3b8;display:none;padding:8px;background:#0f172a;border-radius:6px"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="section-title">功能</div>
   <div class="tab-bar">
     <button class="active" data-tab="inbox">收件箱</button>
@@ -350,6 +361,27 @@ async function saveKeepalive(e) {
   });
   showToast('保号配置已保存', 'success');
   loadKeepalive();
+}
+
+async function queryBalance() {
+  const btn = $('balanceBtn') || document.querySelector('[onclick="queryBalance()"]');
+  const code = $('ussdCode').value.trim() || '*100#';
+  const resultEl = $('balanceResult');
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = '查询中...';
+  resultEl.style.color = '#94a3b8';
+  try {
+    const r = await fetchJSON(API + '/api/balance/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ussd_code: code }),
+    });
+    resultEl.innerHTML = escHtml(r.result);
+    resultEl.style.color = '#22c55e';
+  } catch (e) {
+    resultEl.innerHTML = '查询失败: ' + escHtml(e.message);
+    resultEl.style.color = '#ef4444';
+  }
 }
 
 async function runKeepalive() {
