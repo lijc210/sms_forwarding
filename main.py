@@ -32,6 +32,15 @@ sms_cache_lock = asyncio.Lock()
 
 app = FastAPI(title="SMS 网关")
 
+keepalive_config = {
+    "enabled": False,
+    "url": "http://www.baidu.com",
+    "interval_hours": 24,
+    "last_run": None,
+    "last_result": None,
+}
+keepalive_lock = asyncio.Lock()
+
 
 async def _query_cached_csq():
     if not modem.connected:
@@ -308,6 +317,55 @@ async def _list_sms() -> list[dict]:
     return messages
 
 
+async def _keepalive_execute(url: str) -> str:
+    try:
+        await modem.send_command("AT+CGATT=1", timeout=5)
+        await asyncio.sleep(1)
+        resp = await modem.send_command("AT+CGACT=1,1", timeout=10)
+        ip = ""
+        for line in resp:
+            if "+CGACT:" in line and ",1" in line:
+                ip = "ok"
+        resp2 = await modem.send_command("AT+CGPADDR=1", timeout=5)
+        for line in resp2:
+            if "+CGPADDR:" in line:
+                ip = line.split(",")[-1].strip().strip('"')
+
+        await modem.send_command("AT+HTTPINIT", timeout=5)
+        await modem.send_command('AT+HTTPPARA="CID",1', timeout=5)
+        await modem.send_command(f'AT+HTTPPARA="URL","{url}"', timeout=5)
+        await modem.send_command("AT+HTTPACTION=0", timeout=30)
+
+        result = await modem.send_command("AT+HTTPREAD", timeout=10)
+        body = "\n".join(result) if result else "(empty)"
+
+        await modem.send_command("AT+HTTPTERM", timeout=5)
+        logger.info("Keep-alive OK: %s (IP: %s)", url, ip)
+        return f"OK | IP: {ip} | 响应长度: {len(body)}"
+    except ATError as e:
+        logger.warning("Keep-alive AT error: %s", e)
+        return f"AT失败: {e}"
+    except Exception as e:
+        logger.warning("Keep-alive error: %s", e)
+        return f"异常: {e}"
+
+
+async def _keepalive_loop():
+    while True:
+        async with keepalive_lock:
+            cfg = dict(keepalive_config)
+        if cfg["enabled"] and cfg["url"]:
+            async with keepalive_lock:
+                keepalive_config["last_run"] = datetime.now(timezone.utc).isoformat()
+                keepalive_config["last_result"] = "执行中..."
+            result = await _keepalive_execute(cfg["url"])
+            async with keepalive_lock:
+                keepalive_config["last_run"] = datetime.now(timezone.utc).isoformat()
+                keepalive_config["last_result"] = result
+        interval = max(cfg["interval_hours"], 1) * 3600
+        await asyncio.sleep(interval)
+
+
 @app.on_event("startup")
 async def startup():
     try:
@@ -316,6 +374,7 @@ async def startup():
         logger.warning("Modem not available at %s: %s", PORT, e)
     asyncio.create_task(_poll_modem_state())
     asyncio.create_task(_refresh_sms_cache())
+    asyncio.create_task(_keepalive_loop())
 
 
 @app.on_event("shutdown")
@@ -372,6 +431,37 @@ async def delete_sms(index: int):
         return {"success": True}
     except ATError as e:
         raise HTTPException(400, str(e))
+
+
+class KeepaliveConfig(BaseModel):
+    enabled: bool
+    url: str
+    interval_hours: int = 24
+
+
+@app.get("/api/keepalive")
+async def get_keepalive():
+    async with keepalive_lock:
+        return dict(keepalive_config)
+
+
+@app.put("/api/keepalive")
+async def update_keepalive(cfg: KeepaliveConfig):
+    async with keepalive_lock:
+        keepalive_config["enabled"] = cfg.enabled
+        if cfg.url:
+            keepalive_config["url"] = cfg.url
+        if cfg.interval_hours >= 1:
+            keepalive_config["interval_hours"] = cfg.interval_hours
+    return {"success": True}
+
+
+@app.post("/api/keepalive/run")
+async def run_keepalive_now():
+    async with keepalive_lock:
+        url = keepalive_config["url"]
+    asyncio.create_task(_keepalive_execute(url))
+    return {"success": True, "message": "保号任务已触发"}
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

@@ -58,6 +58,12 @@ header h1 { font-size: 22px; font-weight: 600; display: flex; align-items: cente
 .toast.error { background: #ef4444; color: #fff; }
 @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 .loading { opacity: .5; pointer-events: none; }
+.toggle { position: relative; display: inline-block; width: 40px; height: 22px; cursor: pointer; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; inset: 0; background: #475569; border-radius: 22px; transition: .3s; }
+.slider::before { content: ''; position: absolute; left: 3px; bottom: 3px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: .3s; }
+.toggle input:checked + .slider { background: #3b82f6; }
+.toggle input:checked + .slider::before { transform: translateX(18px); }
 @media (max-width: 640px) { .grid-4 { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -81,10 +87,11 @@ header h1 { font-size: 22px; font-weight: 600; display: flex; align-items: cente
     </div>
   </div>
 
-  <div class="section-title">短信</div>
+  <div class="section-title">功能</div>
   <div class="tab-bar">
     <button class="active" data-tab="inbox">收件箱</button>
     <button data-tab="send">发送短信</button>
+    <button data-tab="keepalive">保号</button>
   </div>
 
   <div class="tab-content active" id="tab-inbox">
@@ -106,6 +113,35 @@ header h1 { font-size: 22px; font-weight: 600; display: flex; align-items: cente
         <button class="btn" type="submit" id="sendBtn">发送</button>
       </form>
       <div id="sendResult" style="margin-top:12px;font-size:13px"></div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-keepalive">
+    <div class="card">
+      <h2>保号设置</h2>
+      <p style="font-size:13px;color:#94a3b8;margin-bottom:16px">定期使用蜂窝网络访问指定网页，产生数据流量，防止号码因长期静默被回收。</p>
+      <form id="keepaliveForm" onsubmit="return saveKeepalive(event)">
+        <div class="info-row"><span class="label">启用</span><label class="toggle"><input type="checkbox" id="kaEnabled"><span class="slider"></span></label></div>
+        <div style="margin:12px 0">
+          <label style="font-size:13px;color:#94a3b8;display:block;margin-bottom:4px">目标 URL</label>
+          <input type="url" id="kaUrl" value="http://www.baidu.com" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;color:#e2e8f0;font-size:14px;outline:none">
+        </div>
+        <div style="margin:12px 0">
+          <label style="font-size:13px;color:#94a3b8;display:block;margin-bottom:4px">间隔（小时）</label>
+          <input type="number" id="kaInterval" value="24" min="1" style="width:120px;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;color:#e2e8f0;font-size:14px;outline:none">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px">
+          <button class="btn" type="submit">保存</button>
+          <button class="btn btn-sm" type="button" onclick="runKeepalive()" style="background:#6366f1">立即执行</button>
+        </div>
+      </form>
+      <div id="kaStatus" style="margin-top:16px;padding:12px;background:#0f172a;border-radius:8px;font-size:13px;display:none">
+        <div class="info-row"><span class="label">状态</span><span class="value" id="kaEnabledText">关闭</span></div>
+        <div class="info-row"><span class="label">目标</span><span class="value" id="kaUrlText">-</span></div>
+        <div class="info-row"><span class="label">间隔</span><span class="value" id="kaIntervalText">-</span></div>
+        <div class="info-row"><span class="label">上次执行</span><span class="value" id="kaLastRun">-</span></div>
+        <div class="info-row"><span class="label">上次结果</span><span class="value" id="kaLastResult">-</span></div>
+      </div>
     </div>
   </div>
 </div>
@@ -279,10 +315,55 @@ document.querySelectorAll('.tab-bar button').forEach(btn => {
   });
 });
 
+async function loadKeepalive() {
+  try {
+    const d = await fetchJSON(API + '/api/keepalive');
+    $('kaEnabled').checked = d.enabled;
+    if (d.url) $('kaUrl').value = d.url;
+    if (d.interval_hours) $('kaInterval').value = d.interval_hours;
+    renderKeepaliveStatus(d);
+  } catch {}
+}
+
+function renderKeepaliveStatus(d) {
+  $('kaEnabledText').textContent = d.enabled ? '开启' : '关闭';
+  $('kaUrlText').textContent = d.url || '-';
+  $('kaIntervalText').textContent = d.interval_hours + ' 小时';
+  $('kaLastRun').textContent = d.last_run ? new Date(d.last_run).toLocaleString() : '从未执行';
+  const r = d.last_result || '-';
+  const isOk = r && (r.startsWith('OK') || r.startsWith('执行中'));
+  $('kaLastResult').textContent = r;
+  $('kaLastResult').style.color = isOk ? '#22c55e' : '#94a3b8';
+  $('kaStatus').style.display = 'block';
+}
+
+async function saveKeepalive(e) {
+  e.preventDefault();
+  await fetchJSON(API + '/api/keepalive', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      enabled: $('kaEnabled').checked,
+      url: $('kaUrl').value.trim(),
+      interval_hours: parseInt($('kaInterval').value) || 24,
+    }),
+  });
+  showToast('保号配置已保存', 'success');
+  loadKeepalive();
+}
+
+async function runKeepalive() {
+  await fetchJSON(API + '/api/keepalive/run', { method: 'POST' });
+  showToast('保号任务已触发，请稍后查看结果', 'success');
+  setTimeout(loadKeepalive, 5000);
+}
+
 pollStatus();
 refreshSMS();
+loadKeepalive();
 setInterval(pollStatus, 8000);
 setInterval(refreshSMS, 20000);
+setInterval(loadKeepalive, 30000);
 </script>
 </body>
 </html>
