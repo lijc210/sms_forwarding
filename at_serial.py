@@ -91,6 +91,8 @@ class ATSerial:
                     return response
                 if line == "ERROR":
                     raise ATError(response)
+                if line.startswith("+CME ERROR:"):
+                    raise ATError(response, f"AT command returned {line}")
                 if line.strip() == full_cmd.strip():
                     continue
                 if _is_unsolicited(line):

@@ -4,6 +4,8 @@ import os
 import re
 from datetime import datetime, timezone
 
+import uvicorn
+
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -34,7 +36,10 @@ app = FastAPI(title="SMS 网关")
 
 keepalive_config = {
     "enabled": False,
+    "mode": "url",
     "url": "http://www.baidu.com",
+    "sms_number": "10086",
+    "sms_text": "666",
     "interval_hours": 24,
     "last_run": None,
     "last_result": None,
@@ -350,15 +355,35 @@ async def _keepalive_execute(url: str) -> str:
         return f"异常: {e}"
 
 
+async def _keepalive_execute_sms(number: str, text: str) -> str:
+    try:
+        await modem.send_command("AT+CMGF=1", timeout=2)
+        ref = await modem.send_sms(number, text, timeout=60)
+        logger.info("Keep-alive SMS OK -> %s (ref: %s)", number, ref)
+        return f"OK | SMS 发送成功, 引用号: {ref}"
+    except ATError as e:
+        logger.warning("Keep-alive SMS AT error: %s", e)
+        return f"SMS失败: {e}"
+    except Exception as e:
+        logger.warning("Keep-alive SMS error: %s", e)
+        return f"异常: {e}"
+
+
 async def _keepalive_loop():
     while True:
         async with keepalive_lock:
             cfg = dict(keepalive_config)
-        if cfg["enabled"] and cfg["url"]:
+        if cfg["enabled"]:
             async with keepalive_lock:
                 keepalive_config["last_run"] = datetime.now(timezone.utc).isoformat()
                 keepalive_config["last_result"] = "执行中..."
-            result = await _keepalive_execute(cfg["url"])
+            if cfg.get("mode") == "sms":
+                result = await _keepalive_execute_sms(
+                    cfg.get("sms_number", "10086"),
+                    cfg.get("sms_text", "666"),
+                )
+            else:
+                result = await _keepalive_execute(cfg["url"])
             async with keepalive_lock:
                 keepalive_config["last_run"] = datetime.now(timezone.utc).isoformat()
                 keepalive_config["last_result"] = result
@@ -435,7 +460,10 @@ async def delete_sms(index: int):
 
 class KeepaliveConfig(BaseModel):
     enabled: bool
-    url: str
+    mode: str = "url"
+    url: str = ""
+    sms_number: str = ""
+    sms_text: str = ""
     interval_hours: int = 24
 
 
@@ -449,8 +477,13 @@ async def get_keepalive():
 async def update_keepalive(cfg: KeepaliveConfig):
     async with keepalive_lock:
         keepalive_config["enabled"] = cfg.enabled
+        keepalive_config["mode"] = cfg.mode
         if cfg.url:
             keepalive_config["url"] = cfg.url
+        if cfg.sms_number:
+            keepalive_config["sms_number"] = cfg.sms_number
+        if cfg.sms_text:
+            keepalive_config["sms_text"] = cfg.sms_text
         if cfg.interval_hours >= 1:
             keepalive_config["interval_hours"] = cfg.interval_hours
     return {"success": True}
@@ -459,9 +492,20 @@ async def update_keepalive(cfg: KeepaliveConfig):
 @app.post("/api/keepalive/run")
 async def run_keepalive_now():
     async with keepalive_lock:
-        url = keepalive_config["url"]
-    asyncio.create_task(_keepalive_execute(url))
+        cfg = dict(keepalive_config)
+    if cfg.get("mode") == "sms":
+        asyncio.create_task(_keepalive_execute_sms(
+            cfg.get("sms_number", "10086"),
+            cfg.get("sms_text", "666"),
+        ))
+    else:
+        asyncio.create_task(_keepalive_execute(cfg["url"]))
     return {"success": True, "message": "保号任务已触发"}
+
+
+class ATCommandRequest(BaseModel):
+    command: str
+    timeout: int = 10
 
 
 class BalanceQuery(BaseModel):
@@ -500,7 +544,41 @@ async def query_balance(req: BalanceQuery = BalanceQuery()):
             balance_cache["updated_at"] = datetime.now(timezone.utc).isoformat()
         return {"success": True, "result": result}
     except ATError as e:
-        raise HTTPException(400, f"USSD 查询失败: {e}")
+        error_msg = str(e)
+        if "+CME ERROR: 4" in error_msg:
+            detail = (
+                "USSD 查询被模块拒绝 (CME ERROR: 4)，可能原因：\n"
+                "1. SIM 卡未正确注册到网络 — 检查 AT+CREG? 返回状态\n"
+                "2. 运营商不支持 USSD 交互 — 部分 IoT 资费卡禁用此功能\n"
+                "3. 模块不支持 USSD — 确认模块固件支持 CUSD 命令\n"
+                "4. SIM 卡欠费或停机\n"
+                "建议：先通过 /api/status 确认网络注册状态和信号强度"
+            )
+        else:
+            detail = f"USSD 查询失败: {error_msg}"
+        raise HTTPException(400, detail)
+
+
+@app.post("/api/at/command")
+async def send_at_command(req: ATCommandRequest):
+    if not modem.connected:
+        raise HTTPException(503, "Modem not connected")
+    try:
+        resp = await modem.send_command(req.command, timeout=req.timeout)
+        return {"success": True, "response": resp}
+    except ATError as e:
+        return {"success": False, "response": e.response, "error": str(e)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8900,
+        reload=False,
+    )
