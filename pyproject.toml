@@ -1,0 +1,15 @@
+[project]
+name = "sms-forwarding"
+version = "0.1.0"
+description = "ML307A SMS Gateway"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.139.2",
+    "uvicorn[standard]>=0.30.0",
+    "pyserial>=3.5",
+    "pyserial-asyncio>=0.6",
+]
+
+[project.scripts]
+sms-gateway = "main:main"

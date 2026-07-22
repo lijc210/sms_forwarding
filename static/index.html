@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SMS 网关管理</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+.container { max-width: 1280px; margin: 0 auto; padding: 20px; }
+header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #1e293b; }
+header h1 { font-size: 22px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+.status-bar { display: flex; align-items: center; gap: 12px; font-size: 13px; color: #94a3b8; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
+.dot.err { background: #ef4444; box-shadow: 0 0 6px #ef444488; }
+.dot.warn { background: #f59e0b; box-shadow: 0 0 6px #f59e0b88; }
+.grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.card { background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; }
+.card h2 { font-size: 14px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; }
+.info-grid { display: grid; gap: 10px; }
+.info-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #3341551a; font-size: 13px; }
+.info-row:last-child { border-bottom: none; }
+.info-row .label { color: #94a3b8; }
+.info-row .value { color: #f1f5f9; font-weight: 500; font-family: "SF Mono", "Cascadia Code", monospace; font-size: 12px; }
+.info-row .value.bad { color: #ef4444; }
+.info-row .value.good { color: #22c55e; }
+.section-title { font-size: 18px; font-weight: 600; margin: 24px 0 16px; display: flex; align-items: center; gap: 8px; }
+.tab-bar { display: flex; gap: 4px; background: #0f172a; padding: 4px; border-radius: 8px; margin-bottom: 20px; }
+.tab-bar button { flex: 1; padding: 8px 16px; border: none; background: transparent; color: #64748b; font-size: 14px; cursor: pointer; border-radius: 6px; transition: all .2s; }
+.tab-bar button.active { background: #1e293b; color: #f1f5f9; }
+.tab-bar button:hover:not(.active) { color: #94a3b8; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+#smsForm { display: flex; flex-direction: column; gap: 12px; }
+#smsForm input, #smsForm textarea { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 10px 14px; color: #e2e8f0; font-size: 14px; outline: none; transition: border .2s; }
+#smsForm input:focus, #smsForm textarea:focus { border-color: #3b82f6; }
+#smsForm textarea { min-height: 80px; resize: vertical; }
+.btn { background: #3b82f6; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background .2s; }
+.btn:hover { background: #2563eb; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-danger { background: #ef4444; }
+.btn-danger:hover { background: #dc2626; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.sms-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sms-table th { text-align: left; padding: 8px 10px; color: #64748b; font-weight: 500; border-bottom: 1px solid #334155; font-size: 12px; text-transform: uppercase; }
+.sms-table td { padding: 10px; border-bottom: 1px solid #1e293b; vertical-align: top; }
+.sms-table tr:hover td { background: #1a2332; }
+.sms-number { color: #93c5fd; }
+.sms-date { color: #64748b; font-size: 11px; font-family: monospace; }
+.sms-text { white-space: pre-wrap; word-break: break-all; max-width: 400px; }
+.sms-status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+.sms-status.unread { background: #3b82f622; color: #60a5fa; }
+.sms-status.read { background: #22c55e22; color: #4ade80; }
+.empty-state { text-align: center; padding: 40px; color: #64748b; }
+.toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 8px; font-size: 14px; z-index: 999; animation: slideIn .3s ease; }
+.toast.success { background: #22c55e; color: #fff; }
+.toast.error { background: #ef4444; color: #fff; }
+@keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.loading { opacity: .5; pointer-events: none; }
+@media (max-width: 640px) { .grid-4 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>SMS 网关管理</h1>
+    <div class="status-bar">
+      <span class="dot" id="connDot"></span>
+      <span id="connText">连接中...</span>
+      <span id="updateTime" style="color:#475569;font-size:12px"></span>
+    </div>
+  </header>
+
+  <div id="dashboard">
+    <div class="grid-4">
+      <div class="card"><h2>模组状态</h2><div class="info-grid" id="moduleInfo"><div class="info-row"><span class="label">AT 状态</span><span class="value" id="m-at">-</span></div><div class="info-row"><span class="label">SIM 状态</span><span class="value" id="m-sim">-</span></div><div class="info-row"><span class="label">网络注册</span><span class="value" id="m-network">-</span></div><div class="info-row"><span class="label">数据连接</span><span class="value" id="m-data">-</span></div></div></div>
+      <div class="card"><h2>信号信息</h2><div class="info-grid" id="signalInfo"><div class="info-row"><span class="label">CSQ / RSSI</span><span class="value" id="s-csq">-</span></div><div class="info-row"><span class="label">RSRP</span><span class="value" id="s-rsrp">-</span></div><div class="info-row"><span class="label">RSRQ</span><span class="value" id="s-rsrq">-</span></div><div class="info-row"><span class="label">SINR (Ec/No)</span><span class="value" id="s-sinr">-</span></div></div></div>
+      <div class="card"><h2>SIM 信息</h2><div class="info-grid" id="simInfo"><div class="info-row"><span class="label">运营商</span><span class="value" id="si-operator">-</span></div><div class="info-row"><span class="label">本机号码</span><span class="value" id="si-number">-</span></div><div class="info-row"><span class="label">IMEI</span><span class="value" id="si-imei" style="font-size:11px">-</span></div><div class="info-row"><span class="label">ICCID</span><span class="value" id="si-iccid" style="font-size:11px">-</span></div><div class="info-row"><span class="label">IMSI</span><span class="value" id="si-imsi" style="font-size:11px">-</span></div><div class="info-row"><span class="label">APN</span><span class="value" id="si-apn">-</span></div><div class="info-row"><span class="label">蜂窝 IP</span><span class="value" id="si-ip">-</span></div></div></div>
+      <div class="card"><h2>设备信息</h2><div class="info-grid" id="deviceInfo"><div class="info-row"><span class="label">厂商</span><span class="value" id="d-manufacturer">-</span></div><div class="info-row"><span class="label">型号</span><span class="value" id="d-model">-</span></div><div class="info-row"><span class="label">固件版本</span><span class="value" id="d-revision" style="font-size:11px">-</span></div></div></div>
+    </div>
+  </div>
+
+  <div class="section-title">短信</div>
+  <div class="tab-bar">
+    <button class="active" data-tab="inbox">收件箱</button>
+    <button data-tab="send">发送短信</button>
+  </div>
+
+  <div class="tab-content active" id="tab-inbox">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0">短信记录</h2>
+        <button class="btn btn-sm" onclick="refreshSMS()">刷新</button>
+      </div>
+      <div id="smsContainer"><div class="empty-state">暂无短信</div></div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-send">
+    <div class="card">
+      <h2>发送新短信</h2>
+      <form id="smsForm" onsubmit="return sendSMS(event)">
+        <input type="text" id="smsNumber" placeholder="手机号码 (如 +8613800138000)" required>
+        <textarea id="smsText" placeholder="短信内容..." required></textarea>
+        <button class="btn" type="submit" id="sendBtn">发送</button>
+      </form>
+      <div id="sendResult" style="margin-top:12px;font-size:13px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let pollTimer = null;
+
+function $(id) { return document.getElementById(id); }
+
+function qs(sel, parent) { return (parent||document).querySelector(sel); }
+
+function showToast(msg, type) {
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+async function fetchJSON(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    const body = await r.text();
+    let detail = r.statusText;
+    try { detail = JSON.parse(body).detail || body; } catch {}
+    throw new Error(detail);
+  }
+  return r.json();
+}
+
+function updateConnDot(ok) {
+  $('connDot').className = 'dot ' + (ok ? 'ok' : 'err');
+  $('connText').textContent = ok ? '已连接' : '未连接';
+}
+
+function updateStatus(data) {
+  const setText = (id, val, fallback) => { const el = $(id); if (el) el.textContent = val ?? fallback ?? '-'; };
+
+  if (!data.connected) {
+    updateConnDot(false);
+    ['m-at','m-sim','m-network','m-data','s-csq','s-rsrp','s-rsrq','s-sinr','si-operator','si-number','si-imei','si-iccid','si-imsi','si-apn','si-ip','d-manufacturer','d-model','d-revision'].forEach(id => { const el = $(id); if (el) el.textContent = '-'; });
+    $('updateTime').textContent = '';
+    return;
+  }
+
+  updateConnDot(true);
+  if (data.updated_at) $('updateTime').textContent = new Date(data.updated_at).toLocaleTimeString();
+
+  const mod = data.module || {};
+  setText('m-at', mod.at === 'ok' ? '正常' : mod.at);
+  setText('m-sim', mod.sim || '-');
+  setText('m-network', mod.network || '-');
+  setText('m-data', mod.data_attached === true ? '已启用' : mod.data_attached === false ? '未启用' : '-');
+
+  const sig = data.signal || {};
+  const csq = sig.csq !== undefined ? sig.csq + ' / ' + (sig.rssi !== null ? sig.rssi + ' dBm' : 'N/A') : '-';
+  setText('s-csq', csq);
+  setText('s-rsrp', sig.rsrp !== undefined ? sig.rsrp + ' dBm' : '-');
+  setText('s-rsrq', sig.rsrq !== undefined ? sig.rsrq + ' dB' : '-');
+  setText('s-sinr', sig.ecno !== undefined ? sig.ecno + ' dB' : '-');
+
+  const sim = data.sim || {};
+  setText('si-operator', sim.operator || '-');
+  setText('si-number', sim.number || '-');
+  setText('si-imei', sim.imei || '-');
+  setText('si-iccid', sim.iccid || '-');
+  setText('si-imsi', sim.imsi || '-');
+  setText('si-apn', sim.apn || '-');
+  setText('si-ip', sim.ip || '-');
+
+  const dev = data.device || {};
+  setText('d-manufacturer', dev.manufacturer || '-');
+  setText('d-model', dev.model || '-');
+  setText('d-revision', dev.revision || '-');
+}
+
+async function pollStatus() {
+  try {
+    const data = await fetchJSON(API + '/api/status');
+    updateStatus(data);
+  } catch (e) {
+    updateConnDot(false);
+  }
+}
+
+function renderSMS(msgs) {
+  const container = $('smsContainer');
+  if (!msgs || msgs.length === 0) {
+    container.innerHTML = '<div class="empty-state">暂无短信</div>';
+    return;
+  }
+  let html = '<table class="sms-table"><thead><tr><th>状态</th><th>号码</th><th>时间</th><th>内容</th><th>操作</th></tr></thead><tbody>';
+  for (const m of msgs) {
+    const isUnread = m.status && m.status.toLowerCase().includes('unread');
+    html += '<tr>'
+      + '<td><span class="sms-status ' + (isUnread ? 'unread' : 'read') + '">' + (isUnread ? '未读' : '已读') + '</span></td>'
+      + '<td class="sms-number">' + escHtml(m.number) + '</td>'
+      + '<td class="sms-date">' + escHtml(m.date) + '</td>'
+      + '<td class="sms-text">' + escHtml(m.text) + '</td>'
+      + '<td><button class="btn btn-sm btn-danger" onclick="deleteSMS(' + m.index + ')">删除</button></td>'
+      + '</tr>';
+  }
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+async function refreshSMS() {
+  try {
+    const data = await fetchJSON(API + '/api/sms');
+    renderSMS(data.messages);
+  } catch (e) {
+    showToast('获取短信失败: ' + e.message, 'error');
+  }
+}
+
+async function sendSMS(e) {
+  e.preventDefault();
+  const num = $('smsNumber').value.trim();
+  const text = $('smsText').value.trim();
+  if (!num || !text) return false;
+
+  const btn = $('sendBtn');
+  btn.disabled = true;
+  btn.textContent = '发送中...';
+  $('sendResult').innerHTML = '';
+
+  try {
+    const r = await fetchJSON(API + '/api/sms/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ number: num, text }),
+    });
+    $('sendResult').innerHTML = '<span style="color:#22c55e">发送成功 (引用号: ' + r.ref + ')</span>';
+    $('smsText').value = '';
+    showToast('短信发送成功', 'success');
+    setTimeout(refreshSMS, 2000);
+  } catch (e) {
+    $('sendResult').innerHTML = '<span style="color:#ef4444">发送失败: ' + escHtml(e.message) + '</span>';
+    showToast('发送失败: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '发送';
+  }
+}
+
+async function deleteSMS(index) {
+  if (!confirm('确定删除这条短信？')) return;
+  try {
+    await fetchJSON(API + '/api/sms/' + index, { method: 'DELETE' });
+    showToast('删除成功', 'success');
+    refreshSMS();
+  } catch (e) {
+    showToast('删除失败: ' + e.message, 'error');
+  }
+}
+
+document.querySelectorAll('.tab-bar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+pollStatus();
+refreshSMS();
+setInterval(pollStatus, 8000);
+setInterval(refreshSMS, 20000);
+</script>
+</body>
+</html>
