@@ -87,22 +87,12 @@ header h1 { font-size: 22px; font-weight: 600; display: flex; align-items: cente
     </div>
   </div>
 
-  <div class="grid-4" style="margin-bottom:24px">
-    <div class="card">
-      <h2>余额查询</h2>
-      <div style="display:flex;flex-direction:column;gap:12px">
-        <div class="info-row"><span class="label">USSD 码</span><input type="text" id="ussdCode" value="*100#" style="width:100px;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:4px 8px;color:#e2e8f0;font-size:12px;outline:none"></div>
-        <button class="btn btn-sm" onclick="queryBalance()">查询余额</button>
-        <div id="balanceResult" style="font-size:13px;color:#94a3b8;display:none;padding:8px;background:#0f172a;border-radius:6px"></div>
-      </div>
-    </div>
-  </div>
-
   <div class="section-title">功能</div>
   <div class="tab-bar">
     <button class="active" data-tab="inbox">收件箱</button>
     <button data-tab="send">发送短信</button>
     <button data-tab="keepalive">保号</button>
+    <button data-tab="atdebug">AT 调试</button>
   </div>
 
   <div class="tab-content active" id="tab-inbox">
@@ -130,17 +120,39 @@ header h1 { font-size: 22px; font-weight: 600; display: flex; align-items: cente
   <div class="tab-content" id="tab-keepalive">
     <div class="card">
       <h2>保号设置</h2>
-      <p style="font-size:13px;color:#94a3b8;margin-bottom:16px">定期使用蜂窝网络访问指定网页，产生数据流量，防止号码因长期静默被回收。</p>
+      <p style="font-size:13px;color:#94a3b8;margin-bottom:16px">定期执行操作产生流量/信令，防止号码因长期静默被回收。</p>
       <form id="keepaliveForm" onsubmit="return saveKeepalive(event)">
         <div class="info-row"><span class="label">启用</span><label class="toggle"><input type="checkbox" id="kaEnabled"><span class="slider"></span></label></div>
-        <div style="margin:12px 0">
+
+        <div style="margin:16px 0">
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:8px">保号方式</label>
+          <div style="display:flex;gap:4px;background:#0f172a;padding:3px;border-radius:8px">
+            <button type="button" class="ka-mode-btn active" data-mode="url" onclick="switchKaMode('url')" style="flex:1;padding:7px 12px;border:none;background:transparent;color:#64748b;font-size:13px;cursor:pointer;border-radius:6px;transition:all .2s">网页访问</button>
+            <button type="button" class="ka-mode-btn" data-mode="sms" onclick="switchKaMode('sms')" style="flex:1;padding:7px 12px;border:none;background:transparent;color:#64748b;font-size:13px;cursor:pointer;border-radius:6px;transition:all .2s">发送短信</button>
+          </div>
+        </div>
+
+        <div id="kaUrlFields" style="margin:12px 0">
           <label style="font-size:13px;color:#94a3b8;display:block;margin-bottom:4px">目标 URL</label>
           <input type="url" id="kaUrl" value="http://www.baidu.com" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;color:#e2e8f0;font-size:14px;outline:none">
         </div>
+
+        <div id="kaSmsFields" style="margin:12px 0;display:none">
+          <div style="margin-bottom:12px">
+            <label style="font-size:13px;color:#94a3b8;display:block;margin-bottom:4px">接收号码</label>
+            <input type="text" id="kaSmsNumber" value="10086" placeholder="如 10086" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;color:#e2e8f0;font-size:14px;outline:none">
+          </div>
+          <div>
+            <label style="font-size:13px;color:#94a3b8;display:block;margin-bottom:4px">短信内容</label>
+            <input type="text" id="kaSmsText" value="666" placeholder="如 666" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;color:#e2e8f0;font-size:14px;outline:none">
+          </div>
+        </div>
+
         <div style="margin:12px 0">
           <label style="font-size:13px;color:#94a3b8;display:block;margin-bottom:4px">间隔（小时）</label>
           <input type="number" id="kaInterval" value="24" min="1" style="width:120px;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;color:#e2e8f0;font-size:14px;outline:none">
         </div>
+
         <div style="display:flex;gap:8px;margin-top:16px">
           <button class="btn" type="submit">保存</button>
           <button class="btn btn-sm" type="button" onclick="runKeepalive()" style="background:#6366f1">立即执行</button>
@@ -148,10 +160,53 @@ header h1 { font-size: 22px; font-weight: 600; display: flex; align-items: cente
       </form>
       <div id="kaStatus" style="margin-top:16px;padding:12px;background:#0f172a;border-radius:8px;font-size:13px;display:none">
         <div class="info-row"><span class="label">状态</span><span class="value" id="kaEnabledText">关闭</span></div>
-        <div class="info-row"><span class="label">目标</span><span class="value" id="kaUrlText">-</span></div>
+        <div class="info-row"><span class="label">方式</span><span class="value" id="kaModeText">-</span></div>
+        <div class="info-row"><span class="label">目标</span><span class="value" id="kaTargetText">-</span></div>
         <div class="info-row"><span class="label">间隔</span><span class="value" id="kaIntervalText">-</span></div>
         <div class="info-row"><span class="label">上次执行</span><span class="value" id="kaLastRun">-</span></div>
         <div class="info-row"><span class="label">上次结果</span><span class="value" id="kaLastResult">-</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-atdebug">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0">AT 指令调试</h2>
+        <span style="font-size:12px;color:#64748b">直接与串口模块交互</span>
+      </div>
+      <div style="display:grid;gap:8px;grid-template-columns:1fr auto">
+        <div>
+          <label style="font-size:12px;color:#94a3b8;display:block;margin-bottom:4px">AT 指令</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="atCmd" value="AT" style="flex:1;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;color:#e2e8f0;font-size:14px;outline:none;font-family:monospace" onkeydown="if(event.key==='Enter') sendATCommand()" autocomplete="off" spellcheck="false">
+            <button class="btn" onclick="sendATCommand()" id="atSendBtn">发送</button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;justify-content:end">
+          <label style="font-size:12px;color:#94a3b8;display:block">超时 (秒)</label>
+          <input type="number" id="atTimeout" value="10" min="1" max="120" style="width:80px;background:#0f172a;border:1px solid #334155;border-radius:6px;padding:8px 10px;color:#e2e8f0;font-size:13px;outline:none">
+        </div>
+      </div>
+      <div style="margin:12px 0;display:flex;flex-wrap:wrap;gap:6px">
+        <button class="btn btn-sm" style="background:#334155" onclick="setAT('AT')">AT</button>
+        <button class="btn btn-sm" style="background:#334155" onclick="setAT('AT+CGMI')">AT+CGMI</button>
+        <button class="btn btn-sm" style="background:#334155" onclick="setAT('AT+CGMM')">AT+CGMM</button>
+        <button class="btn btn-sm" style="background:#334155" onclick="setAT('AT+CGMR')">AT+CGMR</button>
+        <button class="btn btn-sm" style="background:#334155" onclick="setAT('AT+CSQ')">AT+CSQ</button>
+        <button class="btn btn-sm" style="background:#334155" onclick="setAT('AT+CREG?')">AT+CREG?</button>
+        <button class="btn btn-sm" style="background:#334155" onclick="setAT('AT+COPS?')">AT+COPS?</button>
+        <button class="btn btn-sm" style="background:#334155" onclick="setAT('AT+CPIN?')">AT+CPIN?</button>
+        <button class="btn btn-sm" style="background:#334155" onclick="setAT('AT+CGATT?')">AT+CGATT?</button>
+        <button class="btn btn-sm" style="background:#334155" onclick="setAT('AT+CUSD=1,\"*100#\",15')">CUSD *100#</button>
+        <button class="btn btn-sm" style="background:#6366f1" onclick="clearATResponse()">清屏</button>
+      </div>
+      <div id="atResponse" style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;min-height:200px;max-height:400px;overflow-y:auto;font-family:'SF Mono','Cascadia Code',monospace;font-size:12px;line-height:1.6;white-space:pre-wrap" onclick="copyATResponse()" title="点击复制">
+        <span style="color:#64748b">在此输入 AT 指令并点击发送，响应将显示在这里</span>
+      </div>
+      <div style="margin-top:8px;display:flex;justify-content:space-between;font-size:11px;color:#475569">
+        <span>提示：点击响应区域可复制内容</span>
+        <span id="atStatus"></span>
       </div>
     </div>
   </div>
@@ -326,11 +381,24 @@ document.querySelectorAll('.tab-bar button').forEach(btn => {
   });
 });
 
+function switchKaMode(mode) {
+  document.querySelectorAll('.ka-mode-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+    b.style.background = b.dataset.mode === mode ? '#1e293b' : 'transparent';
+    b.style.color = b.dataset.mode === mode ? '#f1f5f9' : '#64748b';
+  });
+  $('kaUrlFields').style.display = mode === 'url' ? 'block' : 'none';
+  $('kaSmsFields').style.display = mode === 'sms' ? 'block' : 'none';
+}
+
 async function loadKeepalive() {
   try {
     const d = await fetchJSON(API + '/api/keepalive');
     $('kaEnabled').checked = d.enabled;
+    switchKaMode(d.mode || 'url');
     if (d.url) $('kaUrl').value = d.url;
+    if (d.sms_number) $('kaSmsNumber').value = d.sms_number;
+    if (d.sms_text) $('kaSmsText').value = d.sms_text;
     if (d.interval_hours) $('kaInterval').value = d.interval_hours;
     renderKeepaliveStatus(d);
   } catch {}
@@ -338,7 +406,12 @@ async function loadKeepalive() {
 
 function renderKeepaliveStatus(d) {
   $('kaEnabledText').textContent = d.enabled ? '开启' : '关闭';
-  $('kaUrlText').textContent = d.url || '-';
+  $('kaModeText').textContent = d.mode === 'sms' ? '发送短信' : '网页访问';
+  if (d.mode === 'sms') {
+    $('kaTargetText').textContent = (d.sms_number || '-') + ' / ' + (d.sms_text || '-');
+  } else {
+    $('kaTargetText').textContent = d.url || '-';
+  }
   $('kaIntervalText').textContent = d.interval_hours + ' 小时';
   $('kaLastRun').textContent = d.last_run ? new Date(d.last_run).toLocaleString() : '从未执行';
   const r = d.last_result || '-';
@@ -350,38 +423,21 @@ function renderKeepaliveStatus(d) {
 
 async function saveKeepalive(e) {
   e.preventDefault();
+  const body = {
+    enabled: $('kaEnabled').checked,
+    mode: document.querySelector('.ka-mode-btn.active').dataset.mode,
+    interval_hours: parseInt($('kaInterval').value) || 24,
+  };
+  body.url = $('kaUrl').value.trim();
+  body.sms_number = $('kaSmsNumber').value.trim();
+  body.sms_text = $('kaSmsText').value.trim();
   await fetchJSON(API + '/api/keepalive', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      enabled: $('kaEnabled').checked,
-      url: $('kaUrl').value.trim(),
-      interval_hours: parseInt($('kaInterval').value) || 24,
-    }),
+    body: JSON.stringify(body),
   });
   showToast('保号配置已保存', 'success');
   loadKeepalive();
-}
-
-async function queryBalance() {
-  const btn = $('balanceBtn') || document.querySelector('[onclick="queryBalance()"]');
-  const code = $('ussdCode').value.trim() || '*100#';
-  const resultEl = $('balanceResult');
-  resultEl.style.display = 'block';
-  resultEl.innerHTML = '查询中...';
-  resultEl.style.color = '#94a3b8';
-  try {
-    const r = await fetchJSON(API + '/api/balance/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ussd_code: code }),
-    });
-    resultEl.innerHTML = escHtml(r.result);
-    resultEl.style.color = '#22c55e';
-  } catch (e) {
-    resultEl.innerHTML = '查询失败: ' + escHtml(e.message);
-    resultEl.style.color = '#ef4444';
-  }
 }
 
 async function runKeepalive() {
@@ -389,6 +445,116 @@ async function runKeepalive() {
   showToast('保号任务已触发，请稍后查看结果', 'success');
   setTimeout(loadKeepalive, 5000);
 }
+
+// ----- AT 调试 -----
+const AT_HISTORY_KEY = 'at_command_history';
+let atHistory = JSON.parse(localStorage.getItem(AT_HISTORY_KEY) || '[]');
+
+function setAT(cmd) {
+  $('atCmd').value = cmd;
+  $('atCmd').focus();
+}
+
+function addToHistory(cmd) {
+  atHistory = atHistory.filter(c => c !== cmd);
+  atHistory.unshift(cmd);
+  if (atHistory.length > 20) atHistory = atHistory.slice(0, 20);
+  localStorage.setItem(AT_HISTORY_KEY, JSON.stringify(atHistory));
+}
+
+function clearATResponse() {
+  const el = $('atResponse');
+  el.innerHTML = '';
+  $('atStatus').textContent = '';
+}
+
+async function copyATResponse() {
+  const text = $('atResponse').textContent;
+  if (!text || text.includes('在此输入 AT 指令')) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('已复制到剪贴板', 'success');
+  } catch {}
+}
+
+async function sendATCommand() {
+  const cmd = $('atCmd').value.trim();
+  if (!cmd) return;
+  const timeout = parseInt($('atTimeout').value) || 10;
+  const btn = $('atSendBtn');
+  const respEl = $('atResponse');
+  const statusEl = $('atStatus');
+
+  btn.disabled = true;
+  btn.textContent = '发送中...';
+  statusEl.textContent = '执行中...';
+
+  // 添加命令执行标记
+  const timestamp = new Date().toLocaleTimeString();
+  const entry = document.createElement('div');
+  entry.style.marginTop = respEl.children.length > 0 && respEl.lastElementChild ? '12px' : '0';
+  entry.innerHTML = '<span style="color:#818cf8">[' + timestamp + '] >>> ' + escHtml(cmd) + '</span>';
+  respEl.appendChild(entry);
+  respEl.scrollTop = respEl.scrollHeight;
+
+  addToHistory(cmd);
+
+  try {
+    const r = await fetchJSON(API + '/api/at/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: cmd, timeout: timeout }),
+    });
+
+    const resultDiv = document.createElement('div');
+    if (r.success) {
+      const lines = r.response && r.response.length > 0 ? r.response.join('\n') : '(空响应)';
+      resultDiv.innerHTML = '<span style="color:#22c55e">' + escHtml(lines) + '</span>';
+      statusEl.textContent = '✓ 成功 (' + r.response.length + ' 行, '
+        + r.response.reduce((a, l) => a + l.length, 0) + ' 字节)';
+      statusEl.style.color = '#22c55e';
+    } else {
+      const lines = r.response && r.response.length > 0 ? r.response.join('\n') : '';
+      const errMsg = r.error || '未知错误';
+      resultDiv.innerHTML = '<span style="color:#ef4444">' + escHtml(lines ? lines + '\n' : '')
+        + '<b>' + escHtml(errMsg) + '</b></span>';
+      statusEl.textContent = '✗ ' + errMsg;
+      statusEl.style.color = '#ef4444';
+    }
+    respEl.appendChild(resultDiv);
+  } catch (e) {
+    const errDiv = document.createElement('div');
+    errDiv.innerHTML = '<span style="color:#ef4444"><b>请求失败: ' + escHtml(e.message) + '</b></span>';
+    respEl.appendChild(errDiv);
+    statusEl.textContent = '✗ 请求失败: ' + e.message;
+    statusEl.style.color = '#ef4444';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '发送';
+    respEl.scrollTop = respEl.scrollHeight;
+  }
+}
+
+// AT 输入框历史记录 (上下键)
+$('atCmd').addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowUp') {
+    const idx = atHistory.indexOf(this.value);
+    if (idx >= 0 && idx < atHistory.length - 1) {
+      this.value = atHistory[idx + 1];
+    } else if (idx === -1 && atHistory.length > 0) {
+      this.value = atHistory[0];
+    }
+    e.preventDefault();
+  } else if (e.key === 'ArrowDown') {
+    const idx = atHistory.indexOf(this.value);
+    if (idx > 0) {
+      this.value = atHistory[idx - 1];
+    } else if (idx === 0) {
+      this.value = '';
+    }
+    e.preventDefault();
+  }
+});
 
 pollStatus();
 refreshSMS();
