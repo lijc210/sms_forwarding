@@ -1,0 +1,81 @@
+name: 构建并推送 Docker 镜像
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      extra_tags:
+        description: "额外镜像标签（逗号分隔，例如：test）"
+        required: false
+        default: ""
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码（含全部 tag，用于版本比较）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置 QEMU（支持多架构构建）
+        uses: docker/setup-qemu-action@v3
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 判断当前 tag 是否最新版本
+        id: version-check
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            latest=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+            echo "latest_tag=$latest" >> "$GITHUB_OUTPUT"
+            if [ "$latest" = "${{ github.ref_name }}" ]; then
+              echo "is_latest=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "is_latest=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "latest_tag=" >> "$GITHUB_OUTPUT"
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 生成镜像元数据
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable=${{ steps.version-check.outputs.is_latest }}
+            type=raw,value=${{ inputs.extra_tags }},enable=${{ inputs.extra_tags != '' }}
+
+      - name: 构建并推送镜像（linux/amd64, linux/arm64）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

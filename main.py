@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from at_serial import ATSerial, ATError
+from at_serial import ATError, ATSerial
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -261,7 +261,7 @@ def _decode_ucs2(text: str) -> str:
     s = text.strip()
     if not s or len(s) < 16 or len(s) % 4 != 0:
         return text
-    if not re.fullmatch(r'[0-9A-Fa-f]+', s):
+    if not re.fullmatch(r"[0-9A-Fa-f]+", s):
         return text
     try:
         raw = bytes.fromhex(s)
@@ -303,13 +303,15 @@ async def _list_sms() -> list[dict]:
             text = _decode_ucs2(raw_text)
 
             parsed_date = date_raw.replace("+", " ").strip()
-            messages.append({
-                "index": idx,
-                "status": status,
-                "number": number,
-                "date": parsed_date,
-                "text": text,
-            })
+            messages.append(
+                {
+                    "index": idx,
+                    "status": status,
+                    "number": number,
+                    "date": parsed_date,
+                    "text": text,
+                }
+            )
             continue
         i += 1
 
@@ -504,3 +506,17 @@ async def query_balance(req: BalanceQuery = BalanceQuery()):
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
+
+
+WEB_HOST = os.getenv("SMS_WEB_HOST", "0.0.0.0")
+WEB_PORT = int(os.getenv("SMS_WEB_PORT", "8000"))
+
+
+def main():
+    import uvicorn
+
+    uvicorn.run(app, host=WEB_HOST, port=WEB_PORT)
+
+
+if __name__ == "__main__":
+    main()

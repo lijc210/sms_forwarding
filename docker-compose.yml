@@ -1,0 +1,14 @@
+services:
+  sms-gateway:
+    image: ghcr.io/lijc210/sms_forwarding:latest
+    container_name: sms-gateway
+    devices:
+      - /dev/ttyUSB2
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      SMS_PORT: /dev/ttyUSB2
+      SMS_BAUD: "115200"
+      SMS_WEB_PORT: "8000"
+      SMS_WEB_HOST: "0.0.0.0"
