@@ -50,6 +50,7 @@ header h1 { font-size: 22px; font-weight: 600; display: flex; align-items: cente
 .sms-date { color: #64748b; font-size: 11px; font-family: monospace; }
 .sms-text { white-space: pre-wrap; word-break: break-all; max-width: 400px; }
 .sms-status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+.sms-part { display: inline-block; padding: 2px 6px; margin-right: 4px; border-radius: 4px; font-size: 11px; background: #8b5cf622; color: #a78bfa; }
 .sms-status.unread { background: #3b82f622; color: #60a5fa; }
 .sms-status.read { background: #22c55e22; color: #4ade80; }
 .empty-state { text-align: center; padding: 40px; color: #64748b; }
@@ -303,11 +304,12 @@ function renderSMS(msgs) {
   let html = '<table class="sms-table"><thead><tr><th>状态</th><th>号码</th><th>时间</th><th>内容</th><th>操作</th></tr></thead><tbody>';
   for (const m of msgs) {
     const isUnread = m.status && m.status.toLowerCase().includes('unread');
+    const partBadge = m.part ? '<span class="sms-part">' + escHtml(m.part) + '</span> ' : '';
     html += '<tr>'
       + '<td><span class="sms-status ' + (isUnread ? 'unread' : 'read') + '">' + (isUnread ? '未读' : '已读') + '</span></td>'
       + '<td class="sms-number">' + escHtml(m.number) + '</td>'
       + '<td class="sms-date">' + escHtml(m.date) + '</td>'
-      + '<td class="sms-text">' + escHtml(m.text) + '</td>'
+      + '<td class="sms-text">' + partBadge + escHtml(m.text) + '</td>'
       + '<td><button class="btn btn-sm btn-danger" onclick="deleteSMS(' + m.index + ')">删除</button></td>'
       + '</tr>';
   }

@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from at_serial import ATError, ATSerial
+from sms_pdu import PDUParseError, parse_deliver
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -263,20 +264,98 @@ async def _refresh_sms_cache():
 
 def _decode_ucs2(text: str) -> str:
     s = text.strip()
-    if not s or len(s) < 16 or len(s) % 4 != 0:
+    if not s or len(s) < 4 or len(s) % 4 != 0:
         return text
     if not re.fullmatch(r"[0-9A-Fa-f]+", s):
         return text
     try:
         raw = bytes.fromhex(s)
-        return raw.decode("utf-16-be")
+        decoded = raw.decode("utf-16-be")
+        if not decoded.isprintable():
+            return text
+        # 纯 ASCII 结果可能是巧合（如数字串），仅在包含非 ASCII 时才替换
+        if decoded.isascii():
+            return text
+        return decoded
     except (ValueError, UnicodeDecodeError):
         return text
+
+
+async def _list_sms_pdu() -> list[dict]:
+    """PDU 模式（AT+CMGF=0）列出短信并自行解析。
+
+    文本模式无法正确呈现带 UDH 的长短信（会输出为十六进制串）
+    以及字母数字发件人地址，因此优先使用 PDU 模式。
+    """
+    await modem.send_command("AT+CMGF=0", timeout=2)
+    try:
+        r = await modem.send_command("AT+CMGL=4", timeout=15)
+    finally:
+        await modem.send_command("AT+CMGF=1", timeout=2)
+
+    stat_map = {0: "REC UNREAD", 1: "REC READ", 2: "STO UNSENT", 3: "STO SENT"}
+    messages: list[dict] = []
+    i = 0
+    while i < len(r):
+        m = re.match(r'\+CMGL:\s*(\d+)\s*,\s*(\d+|"[^"]*")', r[i])
+        if not m:
+            i += 1
+            continue
+        idx = int(m.group(1))
+        stat_raw = m.group(2).strip('"')
+        status = stat_map.get(int(stat_raw), stat_raw) if stat_raw.isdigit() else stat_raw
+
+        # PDU 位于 +CMGL 行之后的下一非空行
+        i += 1
+        while i < len(r) and not r[i].strip():
+            i += 1
+        if i >= len(r):
+            break
+        pdu = r[i].strip()
+        i += 1
+
+        try:
+            parsed = parse_deliver(pdu)
+        except PDUParseError as e:
+            # 状态报告等非 DELIVER 报文跳过；解析失败保留原始 PDU 供排查
+            logger.debug("PDU 解析失败 (index=%s): %s", idx, e)
+            messages.append(
+                {
+                    "index": idx,
+                    "status": status,
+                    "number": "",
+                    "date": "",
+                    "text": pdu,
+                    "part": None,
+                }
+            )
+            continue
+
+        messages.append(
+            {
+                "index": idx,
+                "status": status,
+                "number": parsed["number"],
+                "date": parsed["date"],
+                "text": parsed["text"],
+                "part": parsed["part"],
+            }
+        )
+
+    return messages
 
 
 async def _list_sms() -> list[dict]:
     if not modem.connected:
         return []
+
+    # 优先 PDU 模式（长短信/字母发件人在文本模式下会乱码）
+    try:
+        return await _list_sms_pdu()
+    except Exception as e:
+        logger.warning("PDU 模式列出短信失败，回退文本模式: %s", e)
+
+    # 回退：文本模式（旧逻辑）
     try:
         await modem.send_command("AT+CMGF=1", timeout=2)
     except ATError:
@@ -291,12 +370,14 @@ async def _list_sms() -> list[dict]:
     i = 0
     while i < len(r):
         line = r[i]
-        m = re.match(r'\+CMGL:\s*(\d+),"(.*?)","(.*?)"(?:,[^,]*)?,"(.*?)"', line)
+        # 标准格式：带引号的号码
+        m = re.match(r'\+CMGL:\s*(\d+),"(.*?)","(.*?)"(?:,*)?,"(.*?)"', line)
         if m:
             idx = int(m.group(1))
             status = m.group(2)
-            number = m.group(3)
+            number_raw = m.group(3)
             date_raw = m.group(4)
+            number = _decode_ucs2(number_raw)
 
             text_parts: list[str] = []
             i += 1
@@ -314,9 +395,41 @@ async def _list_sms() -> list[dict]:
                     "number": number,
                     "date": parsed_date,
                     "text": text,
+                    "part": None,
                 }
             )
             continue
+
+        # 部分调制解调器输出未加引号的 UCS-2 编码号码
+        m2 = re.match(r'\+CMGL:\s*(\d+),"(.*?)",([0-9+*#?]+)(?:,*)?,"(.*?)"', line)
+        if m2:
+            idx = int(m2.group(1))
+            status = m2.group(2)
+            number_raw = m2.group(3)
+            date_raw = m2.group(4)
+            number = _decode_ucs2(number_raw)
+
+            text_parts: list[str] = []
+            i += 1
+            while i < len(r) and not r[i].startswith("+CMGL:") and r[i] != "":
+                text_parts.append(r[i])
+                i += 1
+            raw_text = "\n".join(text_parts).strip()
+            text = _decode_ucs2(raw_text)
+
+            parsed_date = date_raw.replace("+", " ").strip()
+            messages.append(
+                {
+                    "index": idx,
+                    "status": status,
+                    "number": number,
+                    "date": parsed_date,
+                    "text": text,
+                    "part": None,
+                }
+            )
+            continue
+
         i += 1
 
     messages.sort(key=lambda x: x["index"], reverse=True)
