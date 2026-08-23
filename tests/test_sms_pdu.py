@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sms_pdu import decode_address, decode_scts, parse_deliver
+from sms_pdu import decode_address, decode_scts, merge_concat_parts, parse_deliver
 
 # 截图中第 1 条乱码短信的用户数据（长短信第 2/2 段，GSM7 + UDH）
 UD_PART2 = "0500032802025CF5F5ABEC7E5DD3E6F438CC66A7DD67"
@@ -123,6 +123,67 @@ def test_parse_ucs2():
     )
     r = parse_deliver(pdu)
     assert r["text"] == "你好"
+
+
+def make_part(index, number, date, text, seq, total, ref=0x28, status="REC READ"):
+    """构造一条带级联信息的消息记录（模拟 _list_sms_pdu 的输出）"""
+    return {
+        "index": index,
+        "status": status,
+        "number": number,
+        "date": date,
+        "text": text,
+        "part": f"{seq}/{total}",
+        "_concat": {"ref": ref, "total": total, "seq": seq},
+    }
+
+
+def test_merge_concat_parts():
+    plain = {
+        "index": 1,
+        "status": "REC READ",
+        "number": "38885",
+        "date": "26/08/20, 14:00:49 +00",
+        "text": "Dear customer...",
+        "part": None,
+        "_concat": None,
+    }
+    # 故意乱序输入，且第 2 段时间更晚、状态未读
+    p2 = make_part(3, "Lebara", "26/08/21, 09:13:16 +00", ".uk/en/Wificalling", 2, 2, status="REC UNREAD")
+    p1 = make_part(2, "Lebara", "26/08/21, 09:13:13 +00", "https://www.lebara.co", 1, 2)
+
+    merged = merge_concat_parts([plain, p2, p1])
+
+    assert len(merged) == 2
+    assert merged[0] is plain  # 普通短信原样保留
+    m = merged[1]
+    assert m["text"] == "https://www.lebara.co.uk/en/Wificalling"  # 按 seq 升序拼接
+    assert m["index"] == 3  # 保留首条记录位置
+    assert m["indexes"] == [2, 3]
+    assert m["date"] == "26/08/21, 09:13:13 +00"  # 取最早时间
+    assert m["status"] == "REC UNREAD"  # 任一分段未读则整体未读
+    assert m["part"] is None  # 分段齐全
+    assert "_concat" not in m and "_seq" not in m and "_total" not in m
+
+
+def test_merge_concat_parts_incomplete():
+    # 只收到第 2 段（第 1 段丢失）
+    p2 = make_part(3, "Lebara", "26/08/21, 09:13:16 +00", ".uk/en/Wificalling", 2, 2)
+    merged = merge_concat_parts([p2])
+    assert len(merged) == 1
+    assert merged[0]["text"] == ".uk/en/Wificalling"
+    assert merged[0]["part"] == "已收1/2"
+    assert merged[0]["indexes"] == [3]
+
+
+def test_merge_concat_parts_different_sender():
+    # 相同 ref 但发件人不同，不应合并
+    a = make_part(5, "Alice", "26/08/21, 10:00:00 +00", "a", 1, 2)
+    b = make_part(6, "Bob", "26/08/21, 10:00:01 +00", "b", 2, 2)
+    merged = merge_concat_parts([a, b])
+    assert len(merged) == 2
+    assert merged[0]["text"] == "a"
+    assert merged[1]["text"] == "b"
 
 
 if __name__ == "__main__":

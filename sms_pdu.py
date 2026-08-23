@@ -163,7 +163,9 @@ def _parse_udh(ud: bytes) -> tuple[int, dict | None]:
 def parse_deliver(pdu_hex: str) -> dict:
     """解析 SMS-DELIVER PDU（十六进制串，含 SMSC 地址部分）
 
-    返回 {"number", "date", "text", "part"}，part 为长短信分段 "n/m" 或 None。
+    返回 {"number", "date", "text", "part", "concat"}：
+    - part 为长短信分段 "n/m" 或 None
+    - concat 为级联信息 {"ref", "total", "seq"} 或 None（供合并使用）
     非 SMS-DELIVER（如状态报告）抛出 PDUParseError。
     """
     try:
@@ -233,4 +235,44 @@ def parse_deliver(pdu_hex: str) -> dict:
         "date": date,
         "text": text,
         "part": f"{concat['seq']}/{concat['total']}" if concat else None,
+        "concat": concat,
     }
+
+
+def merge_concat_parts(messages: list[dict]) -> list[dict]:
+    """将长短信分段合并为一条（按「发件人+级联ref+总段数」分组）。
+
+    输入的每条消息可含内部字段 _concat（parse_deliver 的级联信息，
+    缺失或 None 表示普通短信，原样保留）。合并后首条记录：
+    - text 为各分段按 seq 升序拼接
+    - index 保留首条记录位置，另增 indexes 列表含全部分段 index（供删除）
+    - date 取各分段最早时间；任一分段未读则整体未读
+    - 分段齐全时 part 置 None，缺失时显示 "已收n/m"
+    """
+    groups: dict[tuple, dict] = {}
+    ordered: list[dict] = []
+    for msg in messages:
+        concat = msg.pop("_concat", None)
+        if concat is None:
+            ordered.append(msg)
+            continue
+        msg["_seq"] = concat["seq"]
+        msg["_total"] = concat["total"]
+        key = (msg["number"], concat["ref"], concat["total"])
+        if key not in groups:
+            groups[key] = {"head": msg, "parts": []}
+            ordered.append(msg)  # 用最先出现的记录占位，稍后回填合并结果
+        groups[key]["parts"].append(msg)
+
+    for group in groups.values():
+        parts = sorted(group["parts"], key=lambda m: m["_seq"])
+        head = group["head"]
+        total = head.pop("_total")
+        head["text"] = "".join(p["text"] for p in parts)
+        head["indexes"] = [p["index"] for p in parts]
+        head["date"] = min(p["date"] for p in parts)
+        if any("unread" in str(p["status"]).lower() for p in parts):
+            head["status"] = "REC UNREAD"
+        head["part"] = None if len(parts) == total else f"已收{len(parts)}/{total}"
+        head.pop("_seq")
+    return ordered

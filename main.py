@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from at_serial import ATError, ATSerial
-from sms_pdu import PDUParseError, parse_deliver
+from sms_pdu import PDUParseError, merge_concat_parts, parse_deliver
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -286,6 +286,7 @@ async def _list_sms_pdu() -> list[dict]:
 
     文本模式无法正确呈现带 UDH 的长短信（会输出为十六进制串）
     以及字母数字发件人地址，因此优先使用 PDU 模式。
+    长短信各分段按「发件人+级联ref」合并为一条返回。
     """
     await modem.send_command("AT+CMGF=0", timeout=2)
     try:
@@ -339,10 +340,11 @@ async def _list_sms_pdu() -> list[dict]:
                 "date": parsed["date"],
                 "text": parsed["text"],
                 "part": parsed["part"],
+                "_concat": parsed["concat"],
             }
         )
 
-    return messages
+    return merge_concat_parts(messages)
 
 
 async def _list_sms() -> list[dict]:

@@ -310,7 +310,7 @@ function renderSMS(msgs) {
       + '<td class="sms-number">' + escHtml(m.number) + '</td>'
       + '<td class="sms-date">' + escHtml(m.date) + '</td>'
       + '<td class="sms-text">' + partBadge + escHtml(m.text) + '</td>'
-      + '<td><button class="btn btn-sm btn-danger" onclick="deleteSMS(' + m.index + ')">删除</button></td>'
+      + '<td><button class="btn btn-sm btn-danger" onclick="deleteSMS(' + JSON.stringify(m.indexes || [m.index]) + ')">删除</button></td>'
       + '</tr>';
   }
   html += '</tbody></table>';
@@ -363,10 +363,12 @@ async function sendSMS(e) {
   }
 }
 
-async function deleteSMS(index) {
+async function deleteSMS(indexes) {
   if (!confirm('确定删除这条短信？')) return;
   try {
-    await fetchJSON(API + '/api/sms/' + index, { method: 'DELETE' });
+    for (const idx of indexes) {
+      await fetchJSON(API + '/api/sms/' + idx, { method: 'DELETE' });
+    }
     showToast('删除成功', 'success');
     refreshSMS();
   } catch (e) {
