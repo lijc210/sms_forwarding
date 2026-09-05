@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -281,6 +281,51 @@ def _decode_ucs2(text: str) -> str:
         return text
 
 
+# 无法解析时间时使用的兜底值（排在最旧）
+_SMS_TIME_FALLBACK = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _parse_sms_time(date_str: str) -> datetime | None:
+    """将短信时间字符串解析为带时区的 datetime；无法解析返回 None。
+
+    支持两种格式：
+    - PDU 模式 "yy/MM/dd, HH:mm:ss ±ZZ" 或 "±ZZ:ZZ"（小时或小时:分钟偏移）
+    - 文本模式 "yy/MM/dd, HH:mm:ss ZZ"（时区为 15 分钟的倍数，省略正号）
+    """
+    s = date_str.strip()
+    m = re.match(
+        r"(\d{2})/(\d{2})/(\d{2}),?\s*(\d{2}):(\d{2}):(\d{2})"
+        r"(?:\s*([+-])?(\d{1,2})(?::(\d{2}))?)?\s*$",
+        s,
+    )
+    if not m:
+        return None
+    y, mo, d, h, mi, sec = (int(g) for g in m.groups()[:6])
+    sign, tz_h, tz_m = m.group(7), m.group(8), m.group(9)
+    try:
+        dt = datetime(2000 + y, mo, d, h, mi, sec, tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    if tz_h is not None:
+        # 带 +/- 号为小时偏移；无符号的数字为 15 分钟倍数（文本模式）
+        if sign:
+            offset = int(tz_h) * 60 + int(tz_m or 0)
+            if sign == "-":
+                offset = -offset
+        else:
+            offset = int(tz_h) * 15
+        dt = dt.replace(tzinfo=timezone(timedelta(minutes=offset)))
+    return dt
+
+
+def _sort_sms_by_time_desc(messages: list[dict]) -> None:
+    """按时间倒序就地排序；无法解析时间的记录排在最后，时间相同保持原顺序"""
+    messages.sort(
+        key=lambda x: _parse_sms_time(x.get("date", "")) or _SMS_TIME_FALLBACK,
+        reverse=True,
+    )
+
+
 async def _list_sms_pdu() -> list[dict]:
     """PDU 模式（AT+CMGF=0）列出短信并自行解析。
 
@@ -344,7 +389,9 @@ async def _list_sms_pdu() -> list[dict]:
             }
         )
 
-    return merge_concat_parts(messages)
+    merged = merge_concat_parts(messages)
+    _sort_sms_by_time_desc(merged)
+    return merged
 
 
 async def _list_sms() -> list[dict]:
@@ -434,7 +481,9 @@ async def _list_sms() -> list[dict]:
 
         i += 1
 
+    # 先按索引倒序，再稳定排序按时间倒序（时间相同时索引大的在前）
     messages.sort(key=lambda x: x["index"], reverse=True)
+    _sort_sms_by_time_desc(messages)
     return messages
 
 
@@ -698,8 +747,8 @@ WEB_PORT = int(os.getenv("SMS_WEB_PORT", "8000"))
 
 
 def main():
-
-    uvicorn.run(app, host=WEB_HOST, port=WEB_PORT)
+    # 自动 reload 需要传入 import 字符串而非 app 对象，否则子进程无法重新加载
+    uvicorn.run("main:app", host=WEB_HOST, port=WEB_PORT, reload=True)
 
 
 if __name__ == "__main__":

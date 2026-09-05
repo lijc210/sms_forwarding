@@ -2,10 +2,12 @@
 FROM debian:latest AS builder
 
 # 更新软件包列表
+# strongswan vowifi
 RUN sed -i 's@deb.debian.org@mirror.sjtu.edu.cn@g' /etc/apt/sources.list.d/debian.sources && \
     apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y vim wget curl net-tools build-essential && \
+    apt-get install strongswan -y && \ 
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
